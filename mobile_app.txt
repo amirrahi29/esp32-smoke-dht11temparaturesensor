@@ -1,0 +1,322 @@
+import 'dart:async';
+import 'dart:math';
+import 'package:d_chart/d_chart.dart';
+import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter/material.dart';
+import 'package:real_time_chart/real_time_chart.dart';
+
+class MyHomePage extends StatefulWidget {
+  const MyHomePage({Key? key}) : super(key: key);
+
+  @override
+  State<MyHomePage> createState() => _MyHomePageState();
+}
+
+class _MyHomePageState extends State<MyHomePage> {
+  int humidity = 0;
+  int smoke = 0;
+  int temperature = 0;
+  double carbonBurnt = 0.0; // Variable to store carbon burnt (in kg)
+  double smokeEmission = 0.0; // Variable to store smoke emission (in units)
+  late StreamController<double> _streamController;
+  bool isCalculating = false; // Flag to indicate if calculations are running
+  double previousCarbonBurnt = 0.0; // Variable to store previous carbon burnt
+  double previousSmokeEmission =
+      0.0; // Variable to store previous smoke emission
+  int? previousSmokeValue; // Variable to store previous smoke value
+
+  @override
+  void initState() {
+    super.initState();
+    // Initialize stream controller
+    _streamController = StreamController<double>();
+
+    // Set up listener for realtime updates
+    setupRealtimeDataListener();
+  }
+
+  @override
+  void dispose() {
+    _streamController.close(); // Close the stream controller
+    super.dispose();
+  }
+
+  setupRealtimeDataListener() {
+    final ref = FirebaseDatabase.instance.ref().child('sensors');
+    ref.onValue.listen((event) {
+      final dynamic data = event.snapshot.value;
+      if (data != null) {
+        setState(() {
+          // Update state with new data
+          humidity = data['humidity'];
+          final int newSmoke =
+              data['temperature']; // Corrected smoke assignment
+          temperature = data['smoke']; // Corrected temperature assignment
+
+          // Update chart data
+          _streamController.add(temperature.toDouble());
+
+          // Check if smoke value has changed
+          if (newSmoke != previousSmokeValue) {
+            smoke = newSmoke;
+            previousSmokeValue = newSmoke;
+
+            // Start or stop calculations based on the button state
+            if (isCalculating) {
+              calculateCarbonAndSmoke();
+            }
+          }
+        });
+      }
+    });
+  }
+
+  // Method to calculate carbon burn and smoke emission
+  calculateCarbonAndSmoke() {
+    const int secondsInterval = 5; // Time interval in seconds
+    carbonBurnt += 0.1 * secondsInterval; // 0.1 kg per second
+    smokeEmission += 10 * secondsInterval; // 10 units per second
+  }
+
+  startCalculations() {
+    setState(() {
+      isCalculating = true;
+    });
+    calculateCarbonAndSmoke();
+  }
+
+  stopCalculations() {
+    if (isCalculating) {
+      setState(() {
+        isCalculating = false;
+        // Store previous carbon burnt and smoke emission values
+        previousCarbonBurnt = carbonBurnt;
+        previousSmokeEmission = smokeEmission;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Calculate total carbon burnt (current + previous)
+    double totalCarbonBurnt = carbonBurnt + previousCarbonBurnt;
+
+    // Calculate total smoke emission (current + previous)
+    double totalSmokeEmission = smokeEmission + previousSmokeEmission;
+
+    List<OrdinalData> ordinalDataListSmoke = [
+      OrdinalData(domain: 'Current', measure: smoke, color: Colors.green[300]),
+      OrdinalData(
+          domain: 'Emitted', measure: smokeEmission, color: Colors.amber[300]),
+    ];
+
+    List<OrdinalData> ordinalDataListCarbon = [
+      OrdinalData(domain: 'Current', measure: previousCarbonBurnt, color: Colors.brown[300]),
+      OrdinalData(
+          domain: 'Emitted', measure: carbonBurnt, color: Colors.blueGrey[300]),
+    ];
+
+    return Scaffold(
+      body: SafeArea(
+        child: Stack(
+          children: <Widget>[
+            Positioned(
+              top: 0,
+              right: 0,
+              left: 0,
+              child: InkWell(
+                onTap: () {
+                  // Fetch data manually when tapped
+                  setupRealtimeDataListener();
+                },
+                child: Container(
+                  padding: EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "Humidity: $humidity%",
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Text(
+                        "Smoke: $temperature units",
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Text(
+                        "Temperature: $smoke°C (When Smoke Emission)",
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Text(
+                        "Carbon Burnt: ${totalCarbonBurnt.toStringAsFixed(2)} kg",
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Text(
+                        "Smoke Emission: ${totalSmokeEmission.toStringAsFixed(2)} units",
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+                top: 150,
+                left: 16,
+                right: 16,
+                child: Column(
+                  children: <Widget>[
+                    SizedBox(
+                      height: 200,
+                      child: RealTimeGraph(
+                        graphColor: Colors.green,
+                        stream: _streamController.stream,
+                      ),
+                    ),
+                    SizedBox(
+                      height: 16,
+                    ),
+                    SizedBox(
+                      height: 160,
+                      child: Row(
+                        children: <Widget>[
+                          Expanded(
+                              flex: 1,
+                              child: Column(
+                                children: <Widget>[
+                                  Container(
+                                    margin: EdgeInsets.only(top: 16),
+                                    child: AspectRatio(
+                                      aspectRatio: 16 / 9,
+                                      child: DChartBarO(
+                                        groupList: [
+                                          OrdinalGroup(
+                                            id: '1',
+                                            data: [
+                                              OrdinalData(
+                                                  domain: 'Current',
+                                                  measure: smoke),
+                                              OrdinalData(
+                                                  domain: 'Emitted',
+                                                  measure: smokeEmission),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    height: 8,
+                                  ),
+                                  Text("Smoke Emission (In Unit.)"),
+                                ],
+                              )),
+                          Expanded(
+                              flex: 1,
+                              child: Column(
+                                children: <Widget>[
+                                  Container(
+                                    margin: EdgeInsets.only(top: 16),
+                                    child: AspectRatio(
+                                      aspectRatio: 16 / 9,
+                                      child: DChartBarO(
+                                        groupList: [
+                                          OrdinalGroup(
+                                            id: '2',
+                                            data: [
+                                              OrdinalData(
+                                                  domain: 'Current',
+                                                  measure: previousCarbonBurnt),
+                                              OrdinalData(
+                                                  domain: 'Total',
+                                                  measure: carbonBurnt),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    height: 8,
+                                  ),
+                                  Text("Carbon (In Kg.)"),
+                                ],
+                              )),
+                        ],
+                      ),
+                    ),
+                    SizedBox(
+                      height: 150,
+                      child: Row(
+                        children: <Widget>[
+                          Expanded(
+                            flex: 1,
+                            child: AspectRatio(
+                              aspectRatio: 6 / 9,
+                              child: DChartPieO(
+                                data: ordinalDataListSmoke,
+                                configRenderPie: const ConfigRenderPie(
+                                  arcWidth: 30,
+                                ),
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            flex: 1,
+                            child: AspectRatio(
+                              aspectRatio: 6 / 6,
+                              child: DChartPieO(
+                                data: ordinalDataListCarbon,
+                                configRenderPie: const ConfigRenderPie(
+                                  arcWidth: 30,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  ],
+                )),
+            Positioned(
+              bottom: 16,
+              left: 16,
+              right: 16,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  ElevatedButton(
+                    onPressed: isCalculating ? null : startCalculations,
+                    child: Text("Start Calculations"),
+                  ),
+                  ElevatedButton(
+                    onPressed: isCalculating ? stopCalculations : null,
+                    child: Text("Stop Calculations"),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
